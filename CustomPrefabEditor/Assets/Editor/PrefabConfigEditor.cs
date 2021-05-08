@@ -4,10 +4,13 @@ using System.Linq;
 using Editor;
 using Editor.Config;
 using UnityEditor;
+using UnityEditor.Experimental.U2D;
 using UnityEngine;
 using UnityEngine.Experimental.UIElements;
 using UnityEditor.Experimental.UIElements;
 using UnityEditor.IMGUI.Controls;
+using UnityEngine.UI;
+using Image = UnityEngine.UI.Image;
 
 
 public class PrefabConfigEditor : EditorWindow
@@ -28,7 +31,14 @@ public class PrefabConfigEditor : EditorWindow
 
     private string _configSearchString;
 
-    private readonly string _resourcesPath = "Assets/Resources";
+    private static readonly int ColorId = Shader.PropertyToID("_Color");
+
+    private Color _prefabColor = new Color();
+
+    private const string ResourcesPath = "Assets/Resources";
+
+    private const string DefaultPrefabCreationPath = "Assets/Scripts/Prefabs/EditorPrefabs";
+
 
     //public Rect _configResultsRect = new Rect(100, 100, 200, 200);
 
@@ -93,8 +103,10 @@ public class PrefabConfigEditor : EditorWindow
 
         DrawConfigRect(windowVisibleRect);
         DrawPreviewRect(windowVisibleRect);
-        DrawFileListRect(windowVisibleRect);
+        DrawApplyConfigRect(windowVisibleRect);
     }
+
+    #region Select Configuration
 
     private void DrawConfigRect(Rect windowVisibleRect)
     {
@@ -141,22 +153,27 @@ public class PrefabConfigEditor : EditorWindow
 
         _configScrollPosition = EditorGUILayout.BeginScrollView(_configScrollPosition);
 
-        foreach (var config in _prefabConfiguration.config)
+        foreach (var configItem in _prefabConfiguration.config)
         {
             if (!string.IsNullOrWhiteSpace(_editorState.ConfigSearchString) &&
-                !config.text.ContainsIgnoreCase(_editorState.ConfigSearchString))
+                !configItem.text.ContainsIgnoreCase(_editorState.ConfigSearchString))
             {
                 continue;
             }
 
-            if (GUILayout.Button(config.text, GUILayout.ExpandWidth(true)))
+            if (GUILayout.Button(configItem.text, GUILayout.ExpandWidth(true)))
             {
-                _editorState.CurrentConfigurationForPreviewText = config.text;
-                _editorState.CurrentConfigurationForPreview = JsonUtility.ToJson(config, true);
+                OnPrefabConfigItemClicked(configItem);
             }
         }
 
         GUILayout.EndScrollView();
+    }
+
+    private void OnPrefabConfigItemClicked(PrefabConfigItem config)
+    {
+        _editorState.CurrentConfigurationForPreviewText = config.text;
+        _editorState.CurrentConfigurationForPreview = JsonUtility.ToJson(config, true);
     }
 
     private void AddAndRegisterResultsView()
@@ -166,103 +183,13 @@ public class PrefabConfigEditor : EditorWindow
         AddAndRegisterSearchResults();
     }
 
-    private void DrawPreviewRect(Rect windowVisibleRect)
-    {
-        var contentRect = columnHeader.GetColumnRect(1);
-        contentRect.x -= xScroll;
-        contentRect.y = contentRect.yMax;
-        contentRect.yMax = windowVisibleRect.yMax;
-        AddAndRegisterPreviewControls(contentRect);
-        GUI.DrawTexture(contentRect, Texture2D.whiteTexture, ScaleMode.StretchToFill, false, 1f,
-            new Color(1f, 0f, 0f, 0.5f), 1, 1);
-    }
-
-    private void AddAndRegisterConfigPreview()
-    {
-        if (string.IsNullOrWhiteSpace(_editorState.CurrentConfigurationForPreview))
-        {
-            return;
-        }
-
-        GUILayout.Space(10);
-
-        EditorGUILayout.LabelField($"Config currently in preview : {_editorState.CurrentConfigurationForPreviewText}");
-
-        _previewScrollPosition =
-            EditorGUILayout.BeginScrollView(_previewScrollPosition, false, true, GUILayout.ExpandHeight(true));
-
-        EditorGUILayout.TextArea(_editorState.CurrentConfigurationForPreview, GUILayout.ExpandHeight(true));
-
-        GUILayout.EndScrollView();
-
-        GUILayout.Space(10);
-    }
-
-    private void AddAndRegisterConfigPrefabPreview()
-    {
-        if (string.IsNullOrWhiteSpace(_editorState.CurrentConfigurationForPreview))
-        {
-            return;
-        }
-
-        var texturePath = GetConfigTexturepath(_editorState.CurrentConfigurationForPreviewText);
-
-        if (string.IsNullOrWhiteSpace(texturePath))
-        {
-            return;
-        }
-
-        GUILayout.Space(10);
-
-        EditorGUILayout.LabelField($"Texture currently in preview : {texturePath} ");
-
-        _previewScrollPosition =
-            EditorGUILayout.BeginScrollView(_previewScrollPosition, false, true, GUILayout.ExpandHeight(true));
-
-        Texture2D texture = (Texture2D) EditorGUIUtility.Load(texturePath);
-
-        EditorGUILayout.HelpBox(new GUIContent(texture));
-
-        GUILayout.EndScrollView();
-
-        GUILayout.Space(10);
-    }
-
-    private string GetConfigTexturepath(string configName)
-    {
-        if (string.IsNullOrWhiteSpace(configName))
-        {
-            return string.Empty;
-        }
-
-        var configItem = _prefabConfiguration?.config?.FirstOrDefault(c => c.text.ContainsIgnoreCase(configName));
-
-        if (configItem == null)
-        {
-            return string.Empty;
-        }
-
-        return Path.Combine(_resourcesPath, configItem.image);
-    }
-
-
-    private void AddAndRegisterPreviewControls(Rect previewRect)
-    {
-        GUILayout.BeginArea(previewRect);
-
-        AddAndRegisterConfigPreview();
-
-        AddAndRegisterConfigPrefabPreview();
-
-        GUILayout.EndArea();
-    }
-
-    private void DrawFileListRect(Rect windowVisibleRect)
+    private void DrawApplyConfigRect(Rect windowVisibleRect)
     {
         var contentRect = columnHeader.GetColumnRect(2);
         contentRect.x -= xScroll;
         contentRect.y = contentRect.yMax;
         contentRect.yMax = windowVisibleRect.yMax;
+        AddAndRegisterApplyConfigurationControls(contentRect);
         GUI.DrawTexture(contentRect, Texture2D.whiteTexture, ScaleMode.StretchToFill, false, 1f,
             new Color(1f, 0f, 0f, 0.5f), 1, 1);
     }
@@ -368,6 +295,155 @@ public class PrefabConfigEditor : EditorWindow
 
         prefabConfig.config = prefabConfig.config.DistinctBy(c => c.text).ToArray();
         return prefabConfig;
+    }
+
+    #endregion
+
+    #region Preview Configuration
+
+    private void DrawPreviewRect(Rect windowVisibleRect)
+    {
+        var contentRect = columnHeader.GetColumnRect(1);
+        contentRect.x -= xScroll;
+        contentRect.y = contentRect.yMax;
+        contentRect.yMax = windowVisibleRect.yMax;
+        AddAndRegisterPreviewControls(contentRect);
+        GUI.DrawTexture(contentRect, Texture2D.whiteTexture, ScaleMode.StretchToFill, false, 1f,
+            new Color(1f, 0f, 0f, 0.5f), 1, 1);
+    }
+
+    private void AddAndRegisterConfigPreview()
+    {
+        if (!_editorState.HasValidConfigurationSelected)
+        {
+            return;
+        }
+
+        GUILayout.Space(10);
+
+        EditorGUILayout.LabelField($"Config currently in preview : {_editorState.CurrentConfigurationForPreviewText}");
+
+        _previewScrollPosition =
+            EditorGUILayout.BeginScrollView(_previewScrollPosition, false, true, GUILayout.ExpandHeight(true));
+
+        EditorGUILayout.TextArea(_editorState.CurrentConfigurationForPreview, GUILayout.ExpandHeight(true));
+
+        GUILayout.EndScrollView();
+
+        GUILayout.Space(10);
+    }
+
+    private void AddAndRegisterConfigPrefabPreview()
+    {
+        if (!_editorState.HasValidConfigurationSelected)
+        {
+            return;
+        }
+
+        var texturePath = GetConfigTexturepath(_editorState.CurrentConfigurationForPreviewText);
+
+        if (string.IsNullOrWhiteSpace(texturePath))
+        {
+            return;
+        }
+
+        GUILayout.Space(10);
+
+        EditorGUILayout.LabelField($"Texture currently in preview : {texturePath} ");
+
+        _previewScrollPosition =
+            EditorGUILayout.BeginScrollView(_previewScrollPosition, false, true, GUILayout.ExpandHeight(true));
+
+        Texture2D texture = (Texture2D) EditorGUIUtility.Load(texturePath);
+
+        EditorGUILayout.HelpBox(new GUIContent(texture));
+
+        GUILayout.EndScrollView();
+
+        GUILayout.Space(10);
+    }
+
+    private string GetConfigTexturepath(string configName)
+    {
+        var configItem = GetSelectedPrefabConfigItem(configName);
+
+        if (configItem == null)
+        {
+            return string.Empty;
+        }
+
+        return Path.Combine(ResourcesPath, configItem.image);
+    }
+
+    private void AddAndRegisterPreviewControls(Rect previewRect)
+    {
+        GUILayout.BeginArea(previewRect);
+
+        AddAndRegisterConfigPreview();
+
+        AddAndRegisterConfigPrefabPreview();
+
+        GUILayout.EndArea();
+    }
+
+    #endregion
+
+    #region Apply Configuration
+
+    private void AddAndRegisterApplyConfigurationControls(Rect applyConfigRect)
+    {
+        GUILayout.BeginArea(applyConfigRect);
+
+        GUILayout.Space(10);
+
+        AddAndRegisterCreatedPrefabFromSelectedConfigButton();
+
+        GUILayout.EndArea();
+    }
+
+    private void AddAndRegisterCreatedPrefabFromSelectedConfigButton()
+    {
+        if (!_editorState.HasValidConfigurationSelected)
+        {
+            return;
+        }
+
+        if (GUILayout.Button("Create Prefab"))
+        {
+            CreatePrefab(_editorState.CurrentConfigurationForPreviewText);
+        }
+    }
+
+    private void CreatePrefab(string itemText)
+    {
+        var prefabConfigItem = GetSelectedPrefabConfigItem(itemText);
+        if (prefabConfigItem == null)
+        {
+            return;
+        }
+
+        var prefabName = prefabConfigItem.text + "_clone_" + DateTime.Now.ToFileTime();
+        var go = new GameObject(prefabName);
+
+        var textComponent = go.AddComponent<Text>();
+        textComponent.text = prefabConfigItem.text;
+
+        var spriteRenderer = go.AddComponent<SpriteRenderer>();
+        spriteRenderer.sprite = AssetDatabase.LoadAssetAtPath(GetConfigTexturepath(itemText), typeof(Sprite)) as Sprite;
+        ColorUtility.TryParseHtmlString(prefabConfigItem.color, out _prefabColor);
+        spriteRenderer.color = _prefabColor;
+        var prefabFullPath = Path.Combine(DefaultPrefabCreationPath, (go.name + ".prefab"));
+        PrefabUtility.SaveAsPrefabAssetAndConnect(go, prefabFullPath, InteractionMode.UserAction);
+        DestroyImmediate(go);
+    }
+
+    #endregion
+
+    private PrefabConfigItem GetSelectedPrefabConfigItem(string itemText)
+    {
+        return !string.IsNullOrWhiteSpace(itemText)
+            ? _prefabConfiguration?.config?.FirstOrDefault(c => c.text.ContainsIgnoreCase(itemText))
+            : null;
     }
 
     private void LogConfiguration()

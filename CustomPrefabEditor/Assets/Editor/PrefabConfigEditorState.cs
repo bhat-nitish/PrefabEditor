@@ -16,6 +16,8 @@ namespace Editor
 
         public string CurrentConfigurationForPreviewText { get; set; }
 
+        public bool HasValidConfigurationSelected => !string.IsNullOrWhiteSpace(CurrentConfigurationForPreviewText);
+
         public void ClearConfigErrorsAndWarnings()
         {
             IsInvalidConfiguration = false;
