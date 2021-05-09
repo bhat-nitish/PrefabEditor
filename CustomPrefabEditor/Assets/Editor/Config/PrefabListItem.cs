@@ -1,7 +1,4 @@
-﻿using System.Collections;
-using System.Collections.Generic;
-using System.IO;
-using UnityEngine;
+﻿using System.IO;
 
 public class PrefabListItem
 {
@@ -10,6 +7,8 @@ public class PrefabListItem
     public string FilePath { get; set; }
 
     public bool IsSelected { get; set; }
+
+    public string Guid { get; set; }
 
     public string DisplayFileName =>
         string.IsNullOrWhiteSpace(FilePath)

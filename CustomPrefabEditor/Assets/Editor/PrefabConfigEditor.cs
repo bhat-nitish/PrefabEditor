@@ -32,6 +32,8 @@ public class PrefabConfigEditor : EditorWindow
 
     private Vector2 _prefabSearchListScrollPosition = Vector2.zero;
 
+    private Vector2 _prefabSelectedListScrollPosition = Vector2.zero;
+
     private string _configSearchString;
 
     private string _prefabSearchString;
@@ -258,7 +260,8 @@ public class PrefabConfigEditor : EditorWindow
     {
         if (string.IsNullOrWhiteSpace(_editorState.CurrentConfigurationFileName)) return;
         GUILayout.Space(5);
-        GUILayout.Label($" Success!! - Configuration was read from {_editorState.CurrentConfigurationFileName}");
+        GUILayout.Label($" Success!! - Configuration was read from {_editorState.CurrentConfigurationFileName}",
+            EditorStyles.whiteLabel);
     }
 
     private void OpenFilePanel()
@@ -292,6 +295,7 @@ public class PrefabConfigEditor : EditorWindow
 
         catch (System.Exception ex)
         {
+            _prefabConfiguration = new PrefabConfig() {config = new PrefabConfigItem[] { }};
             _editorState.HasConfiguratonError = true;
             Debug.Log(ex.Message);
         }
@@ -333,7 +337,8 @@ public class PrefabConfigEditor : EditorWindow
 
         GUILayout.Space(10);
 
-        EditorGUILayout.LabelField($"Config currently in preview : {_editorState.CurrentConfigurationForPreviewText}");
+        EditorGUILayout.LabelField($"Config currently in preview : {_editorState.CurrentConfigurationForPreviewText}",
+            EditorStyles.whiteLabel);
 
         _previewScrollPosition =
             EditorGUILayout.BeginScrollView(_previewScrollPosition, false, true, GUILayout.ExpandHeight(true));
@@ -361,7 +366,7 @@ public class PrefabConfigEditor : EditorWindow
 
         GUILayout.Space(10);
 
-        EditorGUILayout.LabelField($"Texture currently in preview : {texturePath} ");
+        EditorGUILayout.LabelField($"Texture currently in preview : {texturePath} ", EditorStyles.whiteLabel);
 
         _previewScrollPosition =
             EditorGUILayout.BeginScrollView(_previewScrollPosition, false, true, GUILayout.ExpandHeight(true));
@@ -412,6 +417,8 @@ public class PrefabConfigEditor : EditorWindow
 
         GUILayout.Space(10);
 
+        AddAndRegisterPrefabSearchMode();
+
         AddAndRegisterPrefabSearchResults();
 
         AddAndRegisterPrefabSelectedResults();
@@ -419,10 +426,22 @@ public class PrefabConfigEditor : EditorWindow
         GUILayout.EndArea();
     }
 
+    private void AddAndRegisterPrefabSearchMode()
+    {
+        GUILayout.BeginHorizontal();
+
+        _editorState.ShowAllPrefabsInProject =
+            EditorGUILayout.ToggleLeft("Show all prefabs in project", _editorState.ShowAllPrefabsInProject);
+
+        GUILayout.Button("Search in a directory");
+
+        GUILayout.EndHorizontal();
+    }
+
     private void AddAndRegisterCreatedPrefabFromSelectedConfigButton()
     {
         GUILayout.Space(10);
-        
+
         if (!_editorState.HasValidConfigurationSelected)
         {
             return;
@@ -473,7 +492,7 @@ public class PrefabConfigEditor : EditorWindow
     private void AddAndRegisterPrefabSearch()
     {
         GUILayout.Space(10);
-        
+
         GUILayout.BeginHorizontal(GUI.skin.FindStyle("Toolbar"));
 
         EditorGUI.BeginChangeCheck();
@@ -484,12 +503,14 @@ public class PrefabConfigEditor : EditorWindow
         if (EditorGUI.EndChangeCheck())
         {
             _editorState.PrefabSearchString = _prefabSearchString;
+            RefreshPrefabResults();
         }
 
         if (GUILayout.Button(string.Empty, GUI.skin.FindStyle("ToolbarSeachCancelButton")))
         {
             _prefabSearchString = string.Empty;
             _editorState.PrefabSearchString = _prefabSearchString;
+            RefreshPrefabResults();
             GUI.FocusControl(null);
         }
 
@@ -500,17 +521,22 @@ public class PrefabConfigEditor : EditorWindow
     {
         GUILayout.Space(10);
 
-        EditorGUILayout.LabelField($"Prefabs in the project : ");
-
-        _prefabSearchListScrollPosition = EditorGUILayout.BeginScrollView(_prefabSearchListScrollPosition, true, true,
-            GUILayout.ExpandHeight(true));
-
-        foreach (var prefabItem in _prefabsInProject)
+        if (_editorState.ShouldDisplayPrefabResults)
         {
-            prefabItem.IsSelected = EditorGUILayout.ToggleLeft(prefabItem.DisplayFileName, prefabItem.IsSelected);
-        }
+            EditorGUILayout.LabelField($"Prefabs in the project : ", EditorStyles.whiteLabel);
 
-        GUILayout.EndScrollView();
+            _prefabSearchListScrollPosition = EditorGUILayout.BeginScrollView(_prefabSearchListScrollPosition, true,
+                true,
+                GUILayout.ExpandHeight(true));
+
+            foreach (var prefabItem in _prefabsInProject)
+            {
+                prefabItem.IsSelected = EditorGUILayout.ToggleLeft(prefabItem.DisplayFileName, prefabItem.IsSelected);
+                _editorState.TogglePrefabSelection(prefabItem.IsSelected, prefabItem.Guid);
+            }
+
+            GUILayout.EndScrollView();
+        }
 
         GUILayout.Space(10);
     }
@@ -523,22 +549,28 @@ public class PrefabConfigEditor : EditorWindow
 
         GUILayout.Space(10);
 
-        EditorGUILayout.LabelField($"Prefabs selected for Modification : ");
-
-        _prefabSearchListScrollPosition = EditorGUILayout.BeginScrollView(_prefabSearchListScrollPosition, false, true,
-            GUILayout.ExpandHeight(true));
-
-        foreach (var prefabItem in _prefabsInProject)
+        if (_editorState.ShouldDisplayPrefabResults)
         {
-            if (!prefabItem.IsSelected)
+            EditorGUILayout.LabelField($"Prefabs selected for Modification : ", EditorStyles.whiteLabel);
+
+            _prefabSelectedListScrollPosition = EditorGUILayout.BeginScrollView(_prefabSelectedListScrollPosition,
+                false,
+                true,
+                GUILayout.ExpandHeight(true));
+
+            foreach (var prefabItem in _prefabsInProject)
             {
-                continue;
+                if (!prefabItem.IsSelected)
+                {
+                    continue;
+                }
+
+                prefabItem.IsSelected = EditorGUILayout.ToggleLeft(prefabItem.DisplayFileName, prefabItem.IsSelected);
+                _editorState.TogglePrefabSelection(prefabItem.IsSelected, prefabItem.Guid);
             }
 
-            prefabItem.IsSelected = EditorGUILayout.ToggleLeft(prefabItem.FileName, prefabItem.IsSelected);
+            GUILayout.EndScrollView();
         }
-
-        GUILayout.EndScrollView();
 
         GUILayout.Space(10);
     }
@@ -561,6 +593,11 @@ public class PrefabConfigEditor : EditorWindow
         }
     }
 
+    private void RefreshPrefabResults()
+    {
+        _prefabsInProject = GetPrefabsInPath(AssetRootPath);
+    }
+
     private List<PrefabListItem> GetPrefabsInPath(string path)
     {
         var prefabList = new List<PrefabListItem>();
@@ -574,8 +611,28 @@ public class PrefabConfigEditor : EditorWindow
         {
             FileName = Path.GetFileName(filePath),
             FilePath = filePath,
-            IsSelected = false
+            IsSelected = false,
+            Guid = AssetDatabase.AssetPathToGUID(filePath)
         }).ToList();
+
+        if (_editorState.HasPrefabSearchText)
+        {
+            prefabList = prefabList.FindAll(f => f.FileName.ContainsIgnoreCase(_editorState.PrefabSearchString));
+        }
+
+        if (_editorState.SelectedPrefabGuids != null && _editorState.SelectedPrefabGuids.Any())
+        {
+            prefabList.ForEach(p => p.IsSelected = _editorState.SelectedPrefabGuids.Contains(p.Guid));
+        }
+
+        prefabList = prefabList.Where(p => HasComponentInPrefab<Text>(p.FilePath)).OrderBy(p => p.FileName)
+            .ToList();
         return prefabList;
+    }
+
+    private static bool HasComponentInPrefab<T>(string path)
+    {
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+        return prefab != null && prefab.GetComponentsInChildren<T>().Any();
     }
 }
