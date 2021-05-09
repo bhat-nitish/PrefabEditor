@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Editor;
@@ -29,16 +30,25 @@ public class PrefabConfigEditor : EditorWindow
 
     private Vector2 _previewScrollPosition = Vector2.zero;
 
+    private Vector2 _prefabSearchListScrollPosition = Vector2.zero;
+
     private string _configSearchString;
+
+    private string _prefabSearchString;
 
     private static readonly int ColorId = Shader.PropertyToID("_Color");
 
     private Color _prefabColor = new Color();
 
+    private const string AssetRootPath = "Assets";
+
     private const string ResourcesPath = "Assets/Resources";
 
     private const string DefaultPrefabCreationPath = "Assets/Scripts/Prefabs/EditorPrefabs";
 
+    private List<PrefabListItem> _prefabsInProject = new List<PrefabListItem>();
+
+    private List<PrefabListItem> _prefabsInFolder = new List<PrefabListItem>();
 
     //public Rect _configResultsRect = new Rect(100, 100, 200, 200);
 
@@ -52,6 +62,8 @@ public class PrefabConfigEditor : EditorWindow
 
     private void OnEnable()
     {
+        _prefabsInProject = GetPrefabsInPath(AssetRootPath);
+
         columns = new MultiColumnHeaderState.Column[]
         {
             new MultiColumnHeaderState.Column()
@@ -394,15 +406,23 @@ public class PrefabConfigEditor : EditorWindow
     {
         GUILayout.BeginArea(applyConfigRect);
 
-        GUILayout.Space(10);
+        AddAndRegisterPrefabSearch();
 
         AddAndRegisterCreatedPrefabFromSelectedConfigButton();
+
+        GUILayout.Space(10);
+
+        AddAndRegisterPrefabSearchResults();
+
+        AddAndRegisterPrefabSelectedResults();
 
         GUILayout.EndArea();
     }
 
     private void AddAndRegisterCreatedPrefabFromSelectedConfigButton()
     {
+        GUILayout.Space(10);
+        
         if (!_editorState.HasValidConfigurationSelected)
         {
             return;
@@ -422,19 +442,105 @@ public class PrefabConfigEditor : EditorWindow
             return;
         }
 
-        var prefabName = prefabConfigItem.text + "_clone_" + DateTime.Now.ToFileTime();
+        var prefabName = prefabConfigItem.text;
         var go = new GameObject(prefabName);
+        try
+        {
+            var textComponent = go.AddComponent<Text>();
+            textComponent.text = prefabConfigItem.text;
+            var spriteRenderer = go.AddComponent<SpriteRenderer>();
+            spriteRenderer.sprite =
+                AssetDatabase.LoadAssetAtPath(GetConfigTexturepath(itemText), typeof(Sprite)) as Sprite;
+            ColorUtility.TryParseHtmlString(prefabConfigItem.color, out _prefabColor);
+            spriteRenderer.color = _prefabColor;
+            var prefabFullPath = Path.Combine(DefaultPrefabCreationPath, (go.name + ".prefab"));
+            prefabFullPath = AssetDatabase.GenerateUniqueAssetPath(prefabFullPath);
+            PrefabUtility.SaveAsPrefabAssetAndConnect(go, prefabFullPath, InteractionMode.UserAction);
+        }
+        catch (Exception e)
+        {
+            Debug.Log(e.Message);
+        }
 
-        var textComponent = go.AddComponent<Text>();
-        textComponent.text = prefabConfigItem.text;
+        if (go == null)
+        {
+            return;
+        }
 
-        var spriteRenderer = go.AddComponent<SpriteRenderer>();
-        spriteRenderer.sprite = AssetDatabase.LoadAssetAtPath(GetConfigTexturepath(itemText), typeof(Sprite)) as Sprite;
-        ColorUtility.TryParseHtmlString(prefabConfigItem.color, out _prefabColor);
-        spriteRenderer.color = _prefabColor;
-        var prefabFullPath = Path.Combine(DefaultPrefabCreationPath, (go.name + ".prefab"));
-        PrefabUtility.SaveAsPrefabAssetAndConnect(go, prefabFullPath, InteractionMode.UserAction);
         DestroyImmediate(go);
+    }
+
+    private void AddAndRegisterPrefabSearch()
+    {
+        GUILayout.Space(10);
+        
+        GUILayout.BeginHorizontal(GUI.skin.FindStyle("Toolbar"));
+
+        EditorGUI.BeginChangeCheck();
+
+        _prefabSearchString = GUILayout.TextField(_prefabSearchString,
+            GUI.skin.FindStyle("ToolbarSeachTextField"));
+
+        if (EditorGUI.EndChangeCheck())
+        {
+            _editorState.PrefabSearchString = _prefabSearchString;
+        }
+
+        if (GUILayout.Button(string.Empty, GUI.skin.FindStyle("ToolbarSeachCancelButton")))
+        {
+            _prefabSearchString = string.Empty;
+            _editorState.PrefabSearchString = _prefabSearchString;
+            GUI.FocusControl(null);
+        }
+
+        GUILayout.EndHorizontal();
+    }
+
+    private void AddAndRegisterPrefabSearchResults()
+    {
+        GUILayout.Space(10);
+
+        EditorGUILayout.LabelField($"Prefabs in the project : ");
+
+        _prefabSearchListScrollPosition = EditorGUILayout.BeginScrollView(_prefabSearchListScrollPosition, true, true,
+            GUILayout.ExpandHeight(true));
+
+        foreach (var prefabItem in _prefabsInProject)
+        {
+            prefabItem.IsSelected = EditorGUILayout.ToggleLeft(prefabItem.DisplayFileName, prefabItem.IsSelected);
+        }
+
+        GUILayout.EndScrollView();
+
+        GUILayout.Space(10);
+    }
+
+    private void AddAndRegisterPrefabSelectedResults()
+    {
+        bool hasAnySelectedPrefab = _prefabsInProject.Any(p => p.IsSelected);
+        if (!hasAnySelectedPrefab)
+            return;
+
+        GUILayout.Space(10);
+
+        EditorGUILayout.LabelField($"Prefabs selected for Modification : ");
+
+        _prefabSearchListScrollPosition = EditorGUILayout.BeginScrollView(_prefabSearchListScrollPosition, false, true,
+            GUILayout.ExpandHeight(true));
+
+        foreach (var prefabItem in _prefabsInProject)
+        {
+            if (!prefabItem.IsSelected)
+            {
+                continue;
+            }
+
+            prefabItem.IsSelected = EditorGUILayout.ToggleLeft(prefabItem.FileName, prefabItem.IsSelected);
+        }
+
+        GUILayout.EndScrollView();
+
+        GUILayout.Space(10);
     }
 
     #endregion
@@ -453,5 +559,23 @@ public class PrefabConfigEditor : EditorWindow
         {
             Debug.LogWarning($" text = {config.text} , color = {config.color} and image = {config.image} ");
         }
+    }
+
+    private List<PrefabListItem> GetPrefabsInPath(string path)
+    {
+        var prefabList = new List<PrefabListItem>();
+        var prefabGuids = AssetDatabase.FindAssets("t:prefab", new[] {path});
+        if (!prefabGuids.Any())
+            return prefabList;
+        var prefabPaths = prefabGuids.Select(AssetDatabase.GUIDToAssetPath);
+        if (!prefabGuids.Any())
+            return prefabList;
+        prefabList = prefabPaths.Select(filePath => new PrefabListItem()
+        {
+            FileName = Path.GetFileName(filePath),
+            FilePath = filePath,
+            IsSelected = false
+        }).ToList();
+        return prefabList;
     }
 }

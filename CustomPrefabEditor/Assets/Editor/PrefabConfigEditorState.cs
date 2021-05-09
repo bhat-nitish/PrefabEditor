@@ -12,10 +12,12 @@ namespace Editor
 
         public string ConfigSearchString { get; set; }
 
+        public string PrefabSearchString { get; set; }
+
         public string CurrentConfigurationForPreview { get; set; }
 
         public string CurrentConfigurationForPreviewText { get; set; }
-
+        
         public bool HasValidConfigurationSelected => !string.IsNullOrWhiteSpace(CurrentConfigurationForPreviewText);
 
         public void ClearConfigErrorsAndWarnings()
