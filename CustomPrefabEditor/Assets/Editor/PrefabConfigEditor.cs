@@ -10,8 +10,10 @@ using UnityEngine;
 using UnityEngine.Experimental.UIElements;
 using UnityEditor.Experimental.UIElements;
 using UnityEditor.IMGUI.Controls;
+using UnityEditor.VersionControl;
 using UnityEngine.UI;
 using Image = UnityEngine.UI.Image;
+using Object = UnityEngine.Object;
 
 
 public class PrefabConfigEditor : EditorWindow
@@ -22,7 +24,7 @@ public class PrefabConfigEditor : EditorWindow
 
     private float xScroll = 0;
 
-    private PrefabConfigEditorState _editorState = new PrefabConfigEditorState();
+    private PrefabConfigEditorState _editorState = new PrefabConfigEditorState() { };
 
     private PrefabConfig _prefabConfiguration = new PrefabConfig() {config = new PrefabConfigItem[] { }};
 
@@ -50,9 +52,12 @@ public class PrefabConfigEditor : EditorWindow
 
     private List<PrefabListItem> _prefabsInProject = new List<PrefabListItem>();
 
-    private List<PrefabListItem> _prefabsInFolder = new List<PrefabListItem>();
+    private string _currentPrefabDirectory =>
+        _editorState != null && _editorState.ShowAllPrefabsInDirectory
+            ? _editorState.PrefabLocalDirectory
+            : AssetRootPath;
 
-    //public Rect _configResultsRect = new Rect(100, 100, 200, 200);
+    private Color _previewColor;
 
     [MenuItem("EditorTools/PrefabConfigEditor")]
     public static void Create()
@@ -64,6 +69,11 @@ public class PrefabConfigEditor : EditorWindow
 
     private void OnEnable()
     {
+        if (Application.isPlaying)
+        {
+            return;
+        }
+
         _prefabsInProject = GetPrefabsInPath(AssetRootPath);
 
         columns = new MultiColumnHeaderState.Column[]
@@ -103,6 +113,12 @@ public class PrefabConfigEditor : EditorWindow
 
     private void OnGUI()
     {
+        if (Application.isPlaying)
+        {
+            AddAndRegisterNonEditorWarning();
+            return;
+        }
+
         // calculate the window visible rect
         GUILayout.FlexibleSpace();
         var windowVisibleRect = GUILayoutUtility.GetLastRect();
@@ -119,6 +135,16 @@ public class PrefabConfigEditor : EditorWindow
         DrawPreviewRect(windowVisibleRect);
         DrawApplyConfigRect(windowVisibleRect);
     }
+
+    #region Non Editor Scope
+
+    private void AddAndRegisterNonEditorWarning()
+    {
+        GUILayout.Label(
+            "Please stop the application to use the editor. Running the editor tool when the application is running might cause conflicts");
+    }
+
+    #endregion
 
     #region Select Configuration
 
@@ -357,11 +383,28 @@ public class PrefabConfigEditor : EditorWindow
             return;
         }
 
+        var configItem = GetSelectedPrefabConfigItem(_editorState.CurrentConfigurationForPreviewText);
+
         var texturePath = GetConfigTexturepath(_editorState.CurrentConfigurationForPreviewText);
 
         if (string.IsNullOrWhiteSpace(texturePath))
         {
             return;
+        }
+
+        GUILayout.Space(10);
+
+        try
+        {
+            ColorUtility.TryParseHtmlString(configItem.color, out _previewColor);
+
+            EditorGUI.BeginDisabledGroup(true);
+            EditorGUILayout.ColorField("Color", _previewColor);
+            EditorGUI.EndDisabledGroup();
+        }
+        catch (Exception e)
+        {
+            Debug.Log(e.Message);
         }
 
         GUILayout.Space(10);
@@ -415,6 +458,8 @@ public class PrefabConfigEditor : EditorWindow
 
         AddAndRegisterCreatedPrefabFromSelectedConfigButton();
 
+        AddAndRegisterApplyConfigurationButton();
+
         GUILayout.Space(10);
 
         AddAndRegisterPrefabSearchMode();
@@ -426,6 +471,143 @@ public class PrefabConfigEditor : EditorWindow
         GUILayout.EndArea();
     }
 
+    private void AddAndRegisterApplyConfigurationButton()
+    {
+        if (_editorState.SelectedPrefabGuids == null || !_editorState.SelectedPrefabGuids.Any() ||
+            !_editorState.HasValidConfigurationSelected)
+        {
+            return;
+        }
+
+        GUILayout.Space(10);
+
+        if (GUILayout.Button("Apply Configuration"))
+        {
+            ApplySelectedConfigurationToPrefabs();
+        }
+
+        GUILayout.Space(10);
+    }
+
+    private Dictionary<string, GameObject> GetSelectedPrefabsForModification()
+    {
+        var selectedPrefabs = new Dictionary<string, GameObject>();
+
+        if (_editorState.SelectedPrefabGuids == null || !_editorState.SelectedPrefabGuids.Any())
+        {
+            return selectedPrefabs;
+        }
+
+        foreach (var prefabGuid in _editorState.SelectedPrefabGuids)
+        {
+            var prefabPath = AssetDatabase.GUIDToAssetPath(prefabGuid);
+
+            if (string.IsNullOrWhiteSpace(prefabPath))
+            {
+                continue;
+            }
+
+            var prefabObject = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+
+            if (prefabObject == null)
+            {
+                continue;
+            }
+
+            selectedPrefabs.Add(prefabPath, prefabObject);
+        }
+
+        return selectedPrefabs;
+    }
+
+    private void ApplySelectedConfigurationToPrefabs()
+    {
+        try
+        {
+            var selectedPrefabs = GetSelectedPrefabsForModification();
+
+            if (!selectedPrefabs.Any())
+            {
+                return;
+            }
+
+            var prefabConfigItem = GetSelectedPrefabConfigItem(_editorState.CurrentConfigurationForPreviewText);
+            Undo.IncrementCurrentGroup();
+            Undo.SetCurrentGroupName("Apply Prefab Configuration");
+            var undoGroupIndex = Undo.GetCurrentGroup();
+            // Undo.RecordObjects((Object[]) selectedPrefabs.Select(sp => PrefabUtility.LoadPrefabContents(sp.Key)), "Prefab Configuration");
+            //Undo.RecordObjects((Object[]) selectedPrefabs.Select(sp => PrefabUtility.LoadPrefabContents(sp.Key)), "Prefab Configuration");
+            // PrefabUtility.RecordPrefabInstancePropertyModifications(this);
+            //Undo.RecordObjects(selectedPrefabs.Select(pre => pre.Value).ToArray(), "transform selected objects");
+            foreach (var prefab in selectedPrefabs)
+            {
+                // Undo.RecordObject(prefab.Value, "Undo Prefab");
+                ApplyConfigToPrefab(prefab, prefabConfigItem);
+            }
+
+            // AssetDatabase.SaveAssets();
+            Undo.CollapseUndoOperations(undoGroupIndex);
+        }
+        catch (Exception e)
+        {
+            Debug.Log("Errror " + e.Message);
+        }
+    }
+
+    private void ApplyConfigToPrefab(KeyValuePair<string, GameObject> prefab, PrefabConfigItem prefabConfigItem)
+    {
+        if (prefabConfigItem == null)
+        {
+            return;
+        }
+
+        try
+        {
+            var go = prefab.Value;
+            //var go = PrefabUtility.LoadPrefabContents(prefab.Key);
+            Undo.RecordObject(go, "Prefab");
+            var textComponents = go.GetComponentsInChildren<Text>();
+            if (textComponents != null && textComponents.Any())
+            {
+                foreach (var textComponent in textComponents)
+                {
+                    Undo.RecordObject(textComponent, "Text");
+                    textComponent.text = prefabConfigItem.text;
+                }
+            }
+
+            var spriteRenderers = go.GetComponentsInChildren<SpriteRenderer>();
+            if (spriteRenderers != null && spriteRenderers.Any())
+            {
+                foreach (var spriteRenderer in spriteRenderers)
+                {
+                    Undo.RecordObject(spriteRenderer.sprite, "Sprite");
+                    Undo.RecordObject(spriteRenderer, "Color");
+                    spriteRenderer.sprite =
+                        AssetDatabase.LoadAssetAtPath(GetConfigTexturepath(prefabConfigItem.text), typeof(Sprite)) as
+                            Sprite;
+                    ColorUtility.TryParseHtmlString(prefabConfigItem.color, out _prefabColor);
+                    spriteRenderer.color = _prefabColor;
+                }
+            }
+
+            EditorUtility.SetDirty(go);
+            //PrefabUtility.SavePrefabAsset(go);
+            //PrefabUtility.SaveAsPrefabAsset(go, prefab.Key);
+            //PrefabUtility.RecordPrefabInstancePropertyModifications(go);
+            //Debug.Log($"Registering PrefB Modification and result was ");
+            //PrefabUtility.RecordPrefabInstancePropertyModifications(go);
+            //PrefabUtility.SaveAsPrefabAsset(go, prefab.Key);
+            //  EditorUtility.SetDirty(go);
+            //PrefabUtility.RecordPrefabInstancePropertyModifications(go);
+            //PrefabUtility.ApplyPrefabInstance(go, InteractionMode.UserAction);
+        }
+        catch (Exception e)
+        {
+            Debug.Log(e.Message);
+        }
+    }
+
     private void AddAndRegisterPrefabSearchMode()
     {
         GUILayout.BeginHorizontal();
@@ -433,9 +615,47 @@ public class PrefabConfigEditor : EditorWindow
         _editorState.ShowAllPrefabsInProject =
             EditorGUILayout.ToggleLeft("Show all prefabs in project", _editorState.ShowAllPrefabsInProject);
 
-        GUILayout.Button("Search in a directory");
+        if (_editorState.ShowAllPrefabsInProject)
+        {
+            _editorState.ShowAllPrefabsInDirectory = false;
+            RefreshPrefabResults(AssetRootPath);
+        }
+
+        if (GUILayout.Button("Search in a directory"))
+        {
+            OpenPrefabDirectoryPanel();
+        }
 
         GUILayout.EndHorizontal();
+    }
+
+    private void OpenPrefabDirectoryPanel()
+    {
+        try
+        {
+            var path = EditorUtility.OpenFolderPanel("Please select a folder for prefabs", AssetRootPath, "");
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            var directory = Application.dataPath;
+
+
+            var relativePath = path.Substring(path.IndexOf("/" + AssetRootPath, StringComparison.Ordinal) + 1);
+
+
+            _editorState.PrefabLocalDirectory = relativePath;
+            _editorState.ShowAllPrefabsInDirectory = true;
+            _editorState.ShowAllPrefabsInProject = false;
+            RefreshPrefabResults(_currentPrefabDirectory);
+        }
+
+        catch (System.Exception ex)
+        {
+            Debug.Log(ex.Message);
+        }
     }
 
     private void AddAndRegisterCreatedPrefabFromSelectedConfigButton()
@@ -503,14 +723,14 @@ public class PrefabConfigEditor : EditorWindow
         if (EditorGUI.EndChangeCheck())
         {
             _editorState.PrefabSearchString = _prefabSearchString;
-            RefreshPrefabResults();
+            RefreshPrefabResults(_currentPrefabDirectory);
         }
 
         if (GUILayout.Button(string.Empty, GUI.skin.FindStyle("ToolbarSeachCancelButton")))
         {
             _prefabSearchString = string.Empty;
             _editorState.PrefabSearchString = _prefabSearchString;
-            RefreshPrefabResults();
+            RefreshPrefabResults(_currentPrefabDirectory);
             GUI.FocusControl(null);
         }
 
@@ -593,9 +813,9 @@ public class PrefabConfigEditor : EditorWindow
         }
     }
 
-    private void RefreshPrefabResults()
+    private void RefreshPrefabResults(string path)
     {
-        _prefabsInProject = GetPrefabsInPath(AssetRootPath);
+        _prefabsInProject = GetPrefabsInPath(path);
     }
 
     private List<PrefabListItem> GetPrefabsInPath(string path)

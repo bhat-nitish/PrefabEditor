@@ -25,11 +25,13 @@ namespace Editor
         public bool HasPrefabSearchText => !string.IsNullOrWhiteSpace(PrefabSearchString);
 
         public bool ShouldDisplayPrefabResults =>
-            HasPrefabSearchText || ShowAllPrefabsInDirectory || ShowAllPrefabsInProject;
+            ShowAllPrefabsInDirectory || ShowAllPrefabsInProject;
 
         public bool ShowAllPrefabsInProject { get; set; }
 
         public bool ShowAllPrefabsInDirectory { get; set; }
+
+        public string PrefabLocalDirectory { get; set; }
 
         public List<string> SelectedPrefabGuids { get; set; }
 
